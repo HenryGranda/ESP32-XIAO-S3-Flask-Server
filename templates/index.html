@@ -1,32 +1,360 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
-     <meta charset="UTF-8">
-     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-     <style>
-          .container{
-               margin: 0;
-               padding: 0;
-               width: 100%;
-               height: 100vh;
-               background-color: #f1f1bc;
-               color: black;
-               text-align: center;
-          }
-          .containerHeader{
-               display: flex;
-               flex-direction: column;
-               align-items: center;
-          }
-     </style>
-     <title>Videostreaming ESP32-CAM</title>
+  <meta charset="UTF-8">
+  <title>Visualización Proyecto ESP32-CAM y Morfología</title>
+  <style>
+    body {
+      background-color: #f9f9e8;
+      font-family: "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background-color: #2e86c1;
+      color: white;
+      padding: 20px;
+      text-align: center;
+      font-size: 22px;
+    }
+    .logo {
+      margin: 10px auto;
+      text-align: center;
+    }
+    .logo img {
+      width: 200px;
+      max-width: 90%;
+    }
+    .controls {
+      margin: 10px auto;
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .controls button {
+      padding: 10px 18px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background-color: #3498db;
+      color: white;
+      cursor: pointer;
+    }
+    .controls button:hover {
+      background-color: #2a80b9;
+    }
+    .video-container {
+      text-align: center;
+      margin: 20px;
+    }
+    #videoStream {
+      max-width: 90%;
+      border: 4px solid #2e86c1;
+      border-radius: 10px;
+    }
+    .kernel-selector {
+      margin: 20px auto;
+      text-align: center;
+    }
+    .kernel-selector input {
+      margin: 0 10px;
+    }
+    .carousel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .image-set {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .image-set.active {
+      display: flex;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+    }
+    .grid img {
+      width: 300px;
+      height: 300px;
+      object-fit: cover;
+      border: 3px solid #2e86c1;
+      border-radius: 8px;
+    }
+    .carousel-buttons {
+      margin-bottom: 20px;
+    }
+    .carousel-buttons button {
+      margin: 0 10px;
+      padding: 10px 18px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background-color: #3498db;
+      color: white;
+      cursor: pointer;
+    }
+    footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 14px;
+      color: #555;
+    }
+    .filter-selector {
+      margin: 10px auto;
+      text-align: center;
+      font-size: 16px;
+    }
+  </style>
 </head>
-<body class = "container">
-     <div class="containerHeader">
-          <h1>Video Streaming</h1>
-          <img src="{{ url_for('static', filename='Header.webp') }}" alt="Image header" width="50%">
-     </div>
-     <img src="{{ url_for('video_stream') }}">
+<body>
+  <header>
+    Visualización de Proyecto ESP32-CAM y Operaciones Morfológicas
+  </header>
+
+  <div class="logo">
+    <img src="{{ url_for('static', filename='Header.webp') }}" alt="Encabezado">
+  </div>
+
+  <div class="controls">
+    <button onclick="window.location.href='/'">Inicio</button>
+    <button onclick="window.location.href='/parte1a_completa'">Parte 1A Completa</button>
+    <button onclick="window.location.href='/todo_en_flujo'">Todo en Flujo</button>
+    <button onclick="window.location.href='/parte2_morfologia'">Morfología</button>
+    <button onclick="detenerStream()">Detener</button>
+  </div>
+
+
+
+  <!-- SELECTORES DINÁMICOS (Bitwise + Filtros + Sliders) -->
+  <div id="bitwiseSelectContainer" style="display: none; text-align:center;">
+    <label for="bitwiseSelect">Operación Bitwise:</label>
+    <select id="bitwiseSelect" onchange="setBitwise(this.value)">
+      <option value="AND">AND</option>
+      <option value="OR">OR</option>
+      <option value="XOR">XOR</option>
+    </select>
+  </div>
+
+  <div class="filter-selector" id="filterSelectorContainer" style="display: none;">
+    <label for="filterSelect">Filtro de Iluminación:</label>
+    <select id="filterSelect" onchange="setFilter(this.value)">
+      <option value="gray">GRIS</option>
+      <option value="equalized">ECUALIZADO</option>
+      <option value="clahe">CLAHE</option>
+      <option value="gamma">GAMMA</option>
+    </select>
+  </div>
+
+  <div id="sliderContainer" style="display: none; text-align:center; margin: 20px;">
+    <label for="mediaSlider">Media (Gaussiano): <span id="media_val">100</span></label><br>
+    <input type="range" id="mediaSlider" min="0" max="255" value="100"><br><br>
+    <label for="stdSlider">Desviación estándar: <span id="std_val">25</span></label><br>
+    <input type="range" id="stdSlider" min="0" max="100" value="25"><br><br>
+    <label for="varSlider">Varianza (Speckle): <span id="varianza_val">0.01</span></label><br>
+    <input type="range" id="varSlider" min="0" max="1" step="0.01" value="0.01">
+  </div>
+   
+  <!-- VIDEO STREAM -->
+  {% if stream_url %}
+  <div class="video-container">
+    <img id="videoStream" src="{{ stream_url }}">
+  </div>
+
+<!-- SOLO PARA MODO FLUJO -->
+<div id="flujoControls" style="display: none; margin: 20px auto; text-align: center;">
+  <fieldset style="border: 2px solid #2e86c1; border-radius: 10px; padding: 10px; margin: 20px; max-width: 600px; margin-inline:auto;">
+    <legend><span style="color:#2e86c1;">🛠️ Filtros a aplicar en Resultado</span></legend>
+
+    <!-- Filtros con select de tamaños -->
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="mediana_3"> Mediana 3x3</label>
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="mediana_5"> Mediana 5x5</label>
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="mediana_7"> Mediana 7x7</label><br>
+
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="blur_3"> Blur 3x3</label>
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="blur_5"> Blur 5x5</label>
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="blur_7"> Blur 7x7</label><br>
+
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="gauss_3"> Gaussiano 3x3</label>
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="gauss_5"> Gaussiano 5x5</label>
+    <label><input type="checkbox" name="filtro_suavizado" class="flujo-flag" value="gauss_7"> Gaussiano 7x7</label><br><br>
+
+    <!-- Exclusivos entre sí -->
+    <label><input type="checkbox" name="filtro_bordes" class="flujo-flag" value="sobel"> Sobel</label>
+    <label><input type="checkbox" name="filtro_bordes" class="flujo-flag" value="canny"> Canny</label>
+  </fieldset>
+</div>
+
+  {% endif %}
+
+  <!-- MORFOLOGÍA GALERÍA -->
+  {% if image_sets %}
+  <div class="kernel-selector">
+    <label><input type="radio" name="kernel" value="7" checked onchange="filtrarKernel(7)"> Kernel 7x7</label>
+    <label><input type="radio" name="kernel" value="15" onchange="filtrarKernel(15)"> Kernel 15x15</label>
+    <label><input type="radio" name="kernel" value="37" onchange="filtrarKernel(37)"> Kernel 37x37</label>
+  </div>
+
+  <div class="carousel">
+    {% for set in image_sets %}
+    <div class="image-set kernel-{{ set.kernel }} {% if loop.index0 == 0 %}active{% endif %}">
+      <h2>{{ set.title }}</h2>
+      <div class="grid">
+        {% for img_path, label in set.images %}
+        <div>
+          <img src="{{ url_for('static', filename=img_path) }}" alt="{{ label }}">
+          <div>{{ label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+
+    <div class="carousel-buttons">
+      <button onclick="prevSlide()">« Anterior</button>
+      <button onclick="nextSlide()">Siguiente »</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <footer>
+    Proyecto de Visión por Computador - UPS Cuenca
+  </footer>
+
+  <script>
+    let currentIndex = 0;
+    let currentKernel = 7;
+    let currentMode = "{{ current_mode | default('') }}";
+
+    function getVisibleSets() {
+      return Array.from(document.querySelectorAll(`.image-set.kernel-${currentKernel}`));
+    }
+    function show(index) {
+      const sets = getVisibleSets();
+      sets.forEach((el, i) => {
+        el.classList.toggle('active', i === index);
+      });
+    }
+    function nextSlide() {
+      const sets = getVisibleSets();
+      currentIndex = (currentIndex + 1) % sets.length;
+      show(currentIndex);
+    }
+    function prevSlide() {
+      const sets = getVisibleSets();
+      currentIndex = (currentIndex - 1 + sets.length) % sets.length;
+      show(currentIndex);
+    }
+    function filtrarKernel(kernel) {
+      currentKernel = kernel;
+      currentIndex = 0;
+      document.querySelectorAll('.image-set').forEach(el => el.classList.remove('active'));
+      show(currentIndex);
+    }
+    function detenerStream() {
+      document.getElementById('videoStream')?.setAttribute('src', '');
+    }
+    function enviarParametros() {
+      if (currentMode !== 'todo_en_flujo') return;
+      const media = document.getElementById('mediaSlider').value;
+      const desviacion = document.getElementById('stdSlider').value;
+      const varianza = document.getElementById('varSlider').value;
+      fetch(`/set_noise_params`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media, desviacion, varianza })
+      });
+    }
+    function setBitwise(mode) {
+      fetch('/set_bitwise_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: mode })
+      }).then(() => {
+        const video = document.getElementById('videoStream');
+        if (currentMode === 'parte1a_completa') {
+          video.src = '/video_stream_parte1a';
+        }
+      });
+    }
+    function setFilter(filtro) {
+      fetch("/set_filter_mode", {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filter: filtro })
+      });
+    }
+    function setFlujoFlags() {
+      const suavizado = document.querySelector('input[name="filtro_suavizado"]:checked')?.value || null;
+      const bordes = Array.from(document.querySelectorAll('input[name="filtro_bordes"]'))
+                     .find(cb => cb.checked)?.value || null;
+
+
+      fetch("/set_flujo_flags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suavizado, bordes })
+      }).then(() => {
+        const video = document.getElementById("videoStream");
+        video.src = "/video_stream_flujo";  // refresco forzado
+      });
+    }
+    // Simular comportamiento exclusivo con checkboxes
+    function setupExclusiveCheckboxes(name) {
+      const checkboxes = document.querySelectorAll(`input[name="${name}"]`);
+      checkboxes.forEach(cb => {
+        cb.addEventListener("click", () => {
+          if (cb.checked) {
+            checkboxes.forEach(other => {
+              if (other !== cb) other.checked = false;
+            });
+          }
+          setFlujoFlags();
+        });
+      });
+    }
+
+
+
+  window.onload = () => {
+    show(currentIndex);
+
+    if (currentMode === 'todo_en_flujo') {
+      document.getElementById('sliderContainer').style.display = 'block';
+      document.getElementById('flujoControls').style.display = 'block';
+
+      // Listeners sliders
+      document.getElementById('mediaSlider').addEventListener('input', enviarParametros);
+      document.getElementById('stdSlider').addEventListener('input', enviarParametros);
+      document.getElementById('varSlider').addEventListener('input', enviarParametros);
+
+      const updateLabels = () => {
+        document.getElementById('media_val').textContent = mediaSlider.value;
+        document.getElementById('std_val').textContent = stdSlider.value;
+        document.getElementById('varianza_val').textContent = varSlider.value;
+      };
+
+      document.querySelectorAll(".flujo-flag").forEach(cb => {
+        cb.addEventListener("change", setFlujoFlags);
+      });
+
+      updateLabels();
+    }
+
+    if (currentMode === 'parte1a_completa') {
+      document.getElementById('bitwiseSelectContainer').style.display = 'block';
+      document.getElementById('filterSelectorContainer').style.display = 'block';
+    }
+    setupExclusiveCheckboxes("filtro_suavizado");
+    setupExclusiveCheckboxes("filtro_bordes");
+
+  };
+
+  </script>
 </body>
 </html>
