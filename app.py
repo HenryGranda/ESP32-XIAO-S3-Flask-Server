@@ -232,10 +232,9 @@ def generate_stream_flujo():
 
             resultado = noisy.copy()
 
-            # Mostrar qué flags están activos
-            print("🛠️ FLAGS:", flujo_flags)
+            print("🛠 FLAGS:", flujo_flags)
 
-            # Aplicar suavizado
+            # Suavizado
             suavizado = flujo_flags.get("suavizado")
             if suavizado == "mediana_3":
                 resultado = cv2.medianBlur(resultado, 3)
@@ -256,7 +255,7 @@ def generate_stream_flujo():
             elif suavizado == "gauss_7":
                 resultado = cv2.GaussianBlur(resultado, (7, 7), 0)
 
-            # Aplicar detección de bordes
+            # Bordes
             bordes = flujo_flags.get("bordes")
             if bordes == "sobel":
                 print("🧪 Aplicando filtro Sobel...")
@@ -273,31 +272,46 @@ def generate_stream_flujo():
                 edges = cv2.Canny(gray, 100, 200)
                 resultado = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
 
-            # Comparación usando máscara
-            mask = cv2.cvtColor(resultado, cv2.COLOR_BGR2GRAY)
-            _, bin_mask = cv2.threshold(mask, 50, 255, cv2.THRESH_BINARY)
-            comparacion = cv2.bitwise_and(resultado, resultado, mask=bin_mask)
+            # Comparación usando bitwise_and (equivalente a copyTo con máscara)
+            diff_mask = cv2.absdiff(original, resultado)
+            diff_gray = cv2.cvtColor(diff_mask, cv2.COLOR_BGR2GRAY)
+            _, mask = cv2.threshold(diff_gray, 10, 255, cv2.THRESH_BINARY)
+            comparacion = cv2.bitwise_and(resultado, resultado, mask=mask)
 
-            # Preparar paneles visuales
+            # Prepara paneles
             def prep(img, label):
-                if img.ndim == 2:
-                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-                img = cv2.resize(img, (480, 360))
-                cv2.putText(img, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                return img
+                try:
+                    if img is None:
+                        img = np.zeros((360, 480, 3), dtype=np.uint8)
+                    elif img.ndim == 2:
+                        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                    img = cv2.resize(img, (480, 360))
+                    img = img.astype(np.uint8)
+                    cv2.putText(img, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                    return img
+                except Exception as e:
+                    print(f"[prep:{label}] Error:", e)
+                    return np.zeros((360, 480, 3), dtype=np.uint8)
+            # Comparación usando bitwise
+            mask = np.any(resultado != original, axis=2).astype(np.uint8) * 255
+            comparacion = cv2.bitwise_and(resultado, resultado, mask=mask)
+
 
             panels = [
                 prep(original, "Original"),
                 prep(gauss_noise.astype(np.uint8), "Ruido Gaussiano"),
                 prep((frame.astype(np.float32) * speckle_noise).astype(np.uint8), "Speckle"),
                 prep(resultado, "Resultado Final"),
-                prep(comparacion, "Resultado copyTo()")
+                prep(comparacion, "Comparación bitwise")
             ]
 
             try:
                 fila1 = cv2.hconcat(panels[:3])
                 fila2 = cv2.hconcat(panels[3:])
+                if fila1.shape != fila2.shape:
+                    fila2 = cv2.resize(fila2, (fila1.shape[1], fila1.shape[0]))
                 final = cv2.vconcat([fila1, fila2])
+
                 _, jpeg = cv2.imencode('.jpg', final)
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
             except Exception as e:
